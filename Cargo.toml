@@ -1,0 +1,13 @@
+[package]
+name = "imd"
+version = "0.1.0"
+edition = "2021"
+authors = [ "Josh" ]
+[dependencies]
+chrono = "0.4.38"
+clap = { version = "4.5.4", features = ["cargo"] }
+lofty = "0.19.2"
+reqwest = {version = "0.12.4", features = ["blocking", "json"]}
+serde = { version = "1.0.203", features = ["derive"] }
+strsim = "0.11.1"
+url = "2.5.0"
