@@ -3,6 +3,7 @@ use std::time::Duration;
 use chrono::{DateTime, Datelike};
 use serde::Deserialize;
 use url::Url;
+use regex::Regex;
 use super::song_metadata::SongMetadata;
 
 #[derive(Debug, Deserialize)]
@@ -88,33 +89,58 @@ pub fn find_matching_metadata(song_metadata: &SongMetadata) -> Vec<SongMetadata>
         .json()
         .expect("Failed to parse JSON response");
 
-    let result_items = itunes_search_result.unwrap().results;
+    match itunes_search_result {
+        Some(r) => {
+            if r.result_count == 0 {
+                println!("No results found for matching metadata in iTunes, trying again with simplified search terms");
+                let original_title = song_metadata.title.clone().unwrap_or_else(|| "".to_string());
+                let original_artist = song_metadata.artist.clone().unwrap_or_else(|| "".to_string());
+        
+                let simplified_title = simplify_metadata_string(&original_title);
+                let simplified_artist = simplify_metadata_string(&original_artist);
+        
+                if original_title == simplified_title && original_artist == simplified_artist {
+                    panic!("ERROR: No results found for metadata matching for song: {} by {}", original_title, original_artist)
+                } else {
+                    let simplified_metadata = SongMetadata {
+                        title: Some(simplified_title.clone().to_owned()),
+                        artist: Some(simplified_artist.clone().to_owned()),
+                        ..song_metadata.clone()
+                    };
+                    return find_matching_metadata(&simplified_metadata);
+                }
+            } else {
+                let result_items = r.results;
+                println!("Found {} results", result_items.len());
+                println!("Results: {:?}", result_items);
 
-    let result_metadata = result_items.iter()
-        .filter(|item| item.wrapper_type.as_ref().map(|s| s == "track").unwrap_or(false))
-        .map(|item| {
-            SongMetadata {
-                title: item.track_name.clone(),
-                artist: item.artist_name.clone(),
-                album: item.collection_name.clone(),
-                album_artist: None,
-                composer: None,
-                genre: item.primary_genre_name.clone(),
-                track_number: item.track_number.clone(),
-                disc_number: item.disc_number.clone(),
-                year: item.release_date.as_ref().map(|s| itunes_release_date_to_year(s)),
-                comment: None,
-                duration: item.track_time_millis.map(|n| Duration::from_millis(n)),
-                total_tracks: item.track_count.clone(),
-                total_discs: item.disc_count.clone(),
-                is_compilation: None,
+                let result_metadata = result_items.iter()
+                    .filter(|item| item.wrapper_type.as_ref().map(|s| s == "track").unwrap_or(false))
+                    .map(|item| {
+                        SongMetadata {
+                            title: item.track_name.clone(),
+                            artist: item.artist_name.clone(),
+                            album: item.collection_name.clone(),
+                            album_artist: None,
+                            composer: None,
+                            genre: item.primary_genre_name.clone(),
+                            track_number: item.track_number.clone(),
+                            disc_number: item.disc_number.clone(),
+                            year: item.release_date.as_ref().map(|s| itunes_release_date_to_year(s)),
+                            comment: None,
+                            duration: item.track_time_millis.map(|n| Duration::from_millis(n)),
+                            total_tracks: item.track_count.clone(),
+                            total_discs: item.disc_count.clone(),
+                            is_compilation: None,
+                        }
+                    })
+                    .collect::<Vec<SongMetadata>>();
+                matching_items.extend(result_metadata);
+                return matching_items;
             }
-        })
-        .collect::<Vec<SongMetadata>>();
-
-    matching_items.extend(result_metadata);
-
-    return matching_items;
+        },
+        None => { panic!("Somthing went wrong searching for metadata")}
+    }
 }
 
 fn build_itunes_metadata_url(song_metadata: &SongMetadata) -> String {
@@ -142,4 +168,25 @@ fn validate_initial_data(initial_song_metadata: &SongMetadata) {
 
 fn itunes_release_date_to_year(release_date: &str) -> u16 {
     return DateTime::parse_from_rfc3339(release_date).expect("Failed to parse date").year() as u16;
+}
+
+fn simplify_metadata_string(metadata_string: &str) -> String {
+    let re = Regex::new(r"\s[\(\[].*[\)\]]").unwrap();
+    return re.replace_all(metadata_string, "").trim().to_string();
+}
+
+#[test]
+fn test_simplify_metadata_string() {
+
+    // input, expected
+    let test_cases = vec![
+        ("BeepBoop (Single)", "BeepBoop"),
+        ("f(x)", "f(x)"),
+        ("Test Song [Remastered]", "Test Song"),
+        ("Song With No Brackets", "Song With No Brackets"),
+    ];
+
+    for (input, expected) in test_cases {
+        assert_eq!(expected, simplify_metadata_string(input));
+    }
 }
